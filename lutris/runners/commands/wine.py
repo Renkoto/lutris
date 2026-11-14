@@ -14,7 +14,7 @@ from lutris.config import LutrisConfig
 from lutris.exceptions import MissingExecutableError
 from lutris.monitored_command import MonitoredCommand
 from lutris.runners import import_runner
-from lutris.util import linux, system
+from lutris.util import IS_LINUX, linux, system
 from lutris.util.log import logger
 from lutris.util.shell import get_shell_command
 from lutris.util.strings import split_arguments
@@ -518,7 +518,8 @@ def find_winetricks(
     """Find winetricks path."""
     env = env or {}
     winetricks_path = os.path.join(settings.RUNTIME_DIR, "winetricks/winetricks")
-    if system_winetricks or not system.path_exists(winetricks_path):
+    # The runtime's winetricks comes with a Linux zenity, other systems use their own
+    if system_winetricks or not IS_LINUX or not system.path_exists(winetricks_path):
         winetricks_path = system.find_required_executable("winetricks")
         working_dir = None
     else:

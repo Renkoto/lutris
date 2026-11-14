@@ -21,6 +21,7 @@ import threading
 import time
 
 from lutris import settings
+from lutris.util import IS_LINUX, system
 from lutris.util.log import logger
 
 # Where the runtime system installs gogdl
@@ -45,7 +46,13 @@ BROKEN_FILES_RE = re.compile(r"^\[(V1|V2)\] INFO: Found (?P<count>\d+) broken fi
 
 
 def _get_gogdl_binary():
-    """Return the path to the gogdl binary from the runtime directory."""
+    """Return the path to the gogdl binary: the runtime directory's on Linux, where
+    that is a Linux binary, and one installed on the system anywhere else."""
+    if not IS_LINUX:
+        binary = system.find_executable("gogdl")
+        if binary:
+            return binary
+        raise FileNotFoundError("gogdl not found. Please install heroic-gogdl, which provides a 'gogdl' command.")
     binary = os.path.join(GOGDL_DIR, "gogdl")
     if os.path.isfile(binary) and os.access(binary, os.X_OK):
         return binary
