@@ -1,7 +1,9 @@
 """Class to manipulate a process"""
 
 import os
+import subprocess
 
+from lutris.util import IS_LINUX
 from lutris.util.log import logger
 
 IGNORED_PROCESSES = (
@@ -145,3 +147,72 @@ class Process:
             return -1
         logger.info("PID %s exited with code %s", pid, ret_status)
         return ret_status
+
+
+class PsProcess(Process):
+    """Process for systems without a Linux style /proc, like the BSDs.
+
+    The information comes from ps, pgrep and procstat instead.
+    """
+
+    @staticmethod
+    def _run(command):
+        """Return the output of a command, or an empty string if it fails (e.g. the process is gone)"""
+        try:
+            return subprocess.check_output(
+                command, encoding="utf-8", errors="replace", stderr=subprocess.DEVNULL, timeout=5
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def _ps(self, keyword):
+        return self._run(["ps", "-ww", "-o", "%s=" % keyword, "-p", str(self.pid)])
+
+    @property
+    def name(self):
+        """Filename of the executable."""
+        return self._ps("comm") or None
+
+    @property
+    def state(self):
+        """First character of the process state as reported by ps; like on Linux, "Z" is a zombie."""
+        return self._ps("state")[:1] or None
+
+    @property
+    def cmdline(self):
+        """Return command line used to run the process `pid`."""
+        return self._ps("args").replace("\\", "/") or None
+
+    @property
+    def cwd(self):
+        """Return current working dir of process"""
+        for line in self._run(["procstat", "-f", str(self.pid)]).splitlines()[1:]:
+            fields = line.split(None, 9)
+            if len(fields) == 10 and fields[2] == "cwd":
+                return fields[9]
+        return None
+
+    @property
+    def environ(self):
+        """Return the process' environment variables.
+
+        procstat separates variables with spaces, so values that contain
+        spaces are cut short; fine for looking up variables like LUTRIS_GAME_UUID.
+        """
+        env = {}
+        for line in self._run(["procstat", "-e", str(self.pid)]).splitlines()[1:]:
+            fields = line.split(None, 2)
+            for variable in fields[2].split() if len(fields) == 3 else []:
+                if "=" in variable:
+                    key, value = variable.split("=", 1)
+                    env[key] = value
+        return env
+
+    @property
+    def children(self):
+        """Return the child processes of this process"""
+        return [type(self)(pid) for pid in self._run(["pgrep", "-P", str(self.pid)]).split()]
+
+
+if not IS_LINUX:
+    Process = PsProcess  # type: ignore[misc]  # noqa: F811
