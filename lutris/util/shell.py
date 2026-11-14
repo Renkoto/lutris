@@ -44,18 +44,20 @@ def get_bash_rc_file(cwd: str, env: dict[str, str], aliases: dict[str, str] | No
     aliases = aliases or {}
     alias_commands = "\n".join("alias %s=%s" % (key, shlex.quote(str(value))) for key, value in aliases.items())
     current_bashrc = os.path.expanduser("~/.bashrc")
+    # Not every user has one, e.g. it isn't created by default on FreeBSD
+    source_bashrc = ". %s" % shlex.quote(current_bashrc) if os.path.exists(current_bashrc) else ""
     with open(script_path, "w", encoding="utf-8") as script_file:
         script_file.write(
             dedent(
                 """
-            . %s
+            %s
 
             %s
             %s
             cd %s
             """
                 % (
-                    shlex.quote(current_bashrc),
+                    source_bashrc,
                     exported_environment,
                     alias_commands,
                     shlex.quote(cwd),
