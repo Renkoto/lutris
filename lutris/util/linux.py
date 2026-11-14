@@ -6,6 +6,7 @@ import platform
 import re
 import resource
 import shutil
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterator
@@ -14,7 +15,7 @@ from typing import Any, cast
 
 from lutris import settings
 from lutris.exceptions import MisconfigurationError
-from lutris.util import cache_single, flatpak, system
+from lutris.util import IS_LINUX, cache_single, flatpak, system
 from lutris.util.graphics import drivers, glxinfo, vkquery
 from lutris.util.graphics.glxinfo import GlxInfo
 from lutris.util.log import logger
@@ -24,6 +25,50 @@ try:
 except ImportError:
     logger.warning("Package 'distro' unavailable. Unable to read Linux distribution")
     distro = None
+
+
+def _sysctl(name: str) -> str:
+    """Return the value of a BSD sysctl, or an empty string if it isn't available"""
+    try:
+        return subprocess.check_output(
+            ["sysctl", "-n", name], encoding="utf-8", errors="ignore", stderr=subprocess.DEVNULL, timeout=5
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _get_mounted_filesystems() -> list[dict[str, Any]]:
+    """List the mounted filesystems from `mount -p`, with the keys that findmnt provides"""
+    drives = []
+    for line in system.read_process_output(["mount", "-p"]).splitlines():
+        # device, mount point, type, options, dump, pass. The mount point can contain spaces
+        fields = line.split()
+        if len(fields) < 6 or fields[-4] == "squashfs":
+            continue
+        drives.append(
+            {"source": fields[0], "target": " ".join(fields[1:-4]).replace("\\040", " "), "fstype": fields[-4]}
+        )
+    return drives
+
+
+def _get_sysctl_cpus() -> list[dict[str, str]]:
+    """Describe the CPU with the keys that get_cpus() reads from /proc/cpuinfo"""
+    cpu = {
+        "model name": _sysctl("hw.model"),
+        "siblings": _sysctl("hw.ncpu"),
+        "cpu cores": _sysctl("kern.smp.cores"),
+    }
+    return [{key: value for key, value in cpu.items() if value}]
+
+
+def _get_sysctl_ram_info() -> dict[str, str]:
+    """Return RAM information in kB, with the key names used by /proc/meminfo"""
+    mem = {}
+    for key, name in (("MemTotal", "hw.physmem"), ("SwapTotal", "vm.swap_total")):
+        value = _sysctl(name)
+        mem[key] = str(int(value) // 1024) if value.isdigit() else "0"
+    return mem
+
 
 # Linux components used by lutris
 SYSTEM_COMPONENTS = {
@@ -179,6 +224,8 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
     @staticmethod
     def get_cpus() -> list[dict[str, str]]:
         """Parse the output of /proc/cpuinfo"""
+        if not IS_LINUX:
+            return _get_sysctl_cpus()
         cpus = [{}]
         cpu_index = 0
         with open("/proc/cpuinfo", encoding="utf-8") as cpuinfo:
@@ -194,6 +241,8 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
     @staticmethod
     def get_drives() -> list[dict[str, Any]]:
         """Return a list of drives with their filesystems"""
+        if not IS_LINUX:
+            return _get_mounted_filesystems()
         findmnt_output = system.read_process_output(["findmnt", "-J", "--list"])
         if not findmnt_output:
             return []
@@ -219,6 +268,8 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
     @staticmethod
     def get_ram_info() -> dict[str, str]:
         """Parse the output of /proc/meminfo and return RAM information in kB"""
+        if not IS_LINUX:
+            return _get_sysctl_ram_info()
         mem = {}
         with open("/proc/meminfo", encoding="utf-8") as meminfo:
             for line in meminfo.readlines():
@@ -228,6 +279,8 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
 
     def get_dist_info(self) -> str | tuple[str, str, str]:
         """Return distribution information"""
+        if not IS_LINUX:
+            return platform.system(), platform.release(), ""
         if distro is None:
             return "unknown"
         # In Flatpak, read host's os-release instead of the runtime's
@@ -242,7 +295,7 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
         with the supported architectures from the Lutris API
         """
         match platform.machine():
-            case "x86_64":
+            case "x86_64" | "amd64":  # FreeBSD calls it amd64
                 return "x86_64"
             case "i386" | "i686":
                 return "i386"
@@ -257,6 +310,8 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
     @staticmethod
     def get_kernel_version() -> str:
         """Get kernel info from /proc/version"""
+        if not IS_LINUX:
+            return platform.release()
         with open("/proc/version", encoding="utf-8") as kernel_info:
             info = kernel_info.readlines()[0]
             version = info.split(" ")[2]
@@ -405,6 +460,9 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
 
     def get_ldconfig_libs(self) -> list[str]:
         """Return a list of available libraries, as returned by `ldconfig -p`."""
+        if not IS_LINUX:
+            # `ldconfig -p` is glibc's, and the libraries we look for are Linux ones
+            return []
         ldconfig = self.get("ldconfig")
         if not ldconfig:
             logger.error("Could not detect ldconfig on this system")
@@ -482,6 +540,9 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
         return not self.get_missing_requirement_libs(feature)[0]
 
     def is_vulkan_supported(self) -> bool:
+        if not IS_LINUX:
+            # The library check relies on ldconfig and Linux library names
+            return vkquery.is_vulkan_supported()
         return not LINUX_SYSTEM.get_missing_lib_arch("VULKAN") and vkquery.is_vulkan_supported()
 
 
