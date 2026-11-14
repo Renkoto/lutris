@@ -6,7 +6,7 @@ import subprocess
 import threading
 from typing import TypeAlias
 
-from lutris.util import system
+from lutris.util import IS_LINUX, system
 from lutris.util.graphics import drivers
 from lutris.util.linux import LINUX_SYSTEM
 from lutris.util.log import logger
@@ -181,6 +181,8 @@ class GPU:
     def get_gpu_info(self) -> GpuInfoDict:
         """Return information about a GPU"""
         infos = {"DRIVER": "", "PCI_ID": "", "PCI_SUBSYS_ID": "", "PCI_SLOT_NAME": ""}
+        if not IS_LINUX:
+            return {**infos, **drivers.get_gpu_info(self.card)}
         try:
             with open(f"/sys/class/drm/{self.card}/device/uevent", encoding="utf-8") as card_uevent:
                 content = card_uevent.readlines()
@@ -243,6 +245,8 @@ class GPU:
         return None
 
     def get_lspci_name(self) -> str:
+        if not IS_LINUX:
+            return self.gpu_info.get("DEVICE_NAME") or "No GPU"
         lspci_results = [line.split(maxsplit=1) for line in system.execute(["lspci"], timeout=3).split("\n")]
         lspci_results = [parts for parts in lspci_results if len(parts) == 2 and ": " in parts[1]]
         devices = [(pci_id, device_desc.split(": ")[1]) for pci_id, device_desc in lspci_results]

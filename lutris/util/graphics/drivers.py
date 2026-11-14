@@ -2,9 +2,11 @@
 """Hardware driver related utilities
 
 Everything in this module should rely on /proc or /sys only, no executable calls
+(except where those don't exist, which have to use pciconf, pcidump and sysctl)
 """
 
 import os
+import platform
 import re
 from collections.abc import Iterable
 from typing import TypeAlias
@@ -12,7 +14,7 @@ from typing import TypeAlias
 from lutris.util import IS_LINUX, cache_single
 from lutris.util.graphics.glxinfo import GlxInfo
 from lutris.util.log import logger
-from lutris.util.system import read_process_output
+from lutris.util.system import can_find_executable, read_process_output
 
 MIN_RECOMMENDED_NVIDIA_DRIVER = 515
 
@@ -21,9 +23,22 @@ DriverGpuInfoDict: TypeAlias = dict[str, str]
 DriverInfoDict: TypeAlias = dict[str, str]
 
 
+def _get_nvidia_driver_info_sysctl() -> DriverInfoDict:
+    """Nvidia driver information where there's no /proc/driver/nvidia, e.g. on FreeBSD"""
+    version = re.search(r"\d+(\.\d+)+", read_process_output(["sysctl", "-n", "hw.nvidia.version"]))
+    return {
+        "vendor": "NVIDIA",
+        "platform": platform.system(),
+        "arch": platform.machine(),
+        "version": version.group() if version else "",
+    }
+
+
 @cache_single
 def get_nvidia_driver_info() -> DriverInfoDict:
     """Return information about Nvidia drivers"""
+    if not IS_LINUX:
+        return _get_nvidia_driver_info_sysctl()
     version_file_path = "/proc/driver/nvidia/version"
 
     def read_from_proc() -> dict[str, str]:
@@ -175,13 +190,107 @@ def is_nvidia() -> bool:
     return "NVIDIA" in glx_info.opengl_vendor  # type: ignore[attr-defined]
 
 
+# What pciconf -lv prints for every device, e.g.
+# vgapci0@pci0:1:0:0:	class=0x030000 rev=0xa1 hdr=0x00 vendor=0x10de device=0x128b subvendor=0x1458 subdevice=0x3532
+PCICONF_DEVICE = re.compile(
+    r"^(?P<driver>[a-z_]+)\d+@pci(?P<domain>\d+):(?P<bus>\d+):(?P<slot>\d+):(?P<func>\d+):\s+"
+    r"class=0x(?P<class>[0-9a-f]{2})[0-9a-f]{4} .*?vendor=0x(?P<vendor>[0-9a-f]{4}) device=0x(?P<device>[0-9a-f]{4}) "
+    r"subvendor=0x(?P<subvendor>[0-9a-f]{4}) subdevice=0x(?P<subdevice>[0-9a-f]{4})"
+)
+# What pcidump -v prints for every device (OpenBSD); the lines after the first one start with a tab
+#  1:0:0: NVIDIA GK208B
+# 	0x0000: Vendor ID: 10de, Product ID: 128b
+# 	0x0008:	Class: 03 Display, Subclass: 00 VGA,
+# 	0x002c: Subsystem Vendor ID: 1458 Product ID: 3532
+PCIDUMP_DOMAIN = re.compile(r"^Domain /dev/pci(?P<domain>\d+):")
+PCIDUMP_DEVICE = re.compile(r"^ (?P<bus>\d+):(?P<slot>\d+):(?P<func>\d+): (?P<name>.*)$")
+PCIDUMP_IDS = re.compile(r"Vendor ID: (?P<vendor>[0-9a-f]{4}), Product ID: (?P<device>[0-9a-f]{4})")
+PCIDUMP_CLASS = re.compile(r"Class: (?P<class>[0-9a-f]{2}) ")
+PCIDUMP_SUBSYSTEM = re.compile(
+    r"Subsystem Vendor ID: (?P<subvendor>[0-9a-f]{4}) Product ID: (?P<subdevice>[0-9a-f]{4})"
+)
+PCI_DISPLAY_CLASS = "03"
+# The kernel driver that handles the GPUs of each PCI vendor, named as /sys/class/drm names them
+PCI_VENDOR_DRIVERS = {"10de": "nvidia", "1002": "amdgpu", "8086": "i915"}
+
+
+def _pci_gpu_info(ids: dict[str, str], driver: str = "", name: str = "") -> dict[str, str]:
+    """Build the information of a GPU, with the keys of the uevent file of /sys/class/drm/<card>/device"""
+    return {
+        "DRIVER": PCI_VENDOR_DRIVERS.get(ids["vendor"], driver),
+        "PCI_ID": f"{ids['vendor']}:{ids['device']}".upper(),
+        "PCI_SUBSYS_ID": f"{ids.get('subvendor', '0000')}:{ids.get('subdevice', '0000')}".upper(),
+        "PCI_SLOT_NAME": "%04x:%02x:%02x.%d"
+        % (int(ids["domain"]), int(ids["bus"]), int(ids["slot"]), int(ids["func"])),
+        "DEVICE_NAME": name,
+    }
+
+
+def _parse_pciconf(output: str) -> list[dict[str, str]]:
+    gpus = []
+    device: dict[str, str] | None = None
+    for line in output.splitlines():
+        if not line.startswith((" ", "\t")):
+            device = None
+            match = PCICONF_DEVICE.match(line)
+            if match and match["class"] == PCI_DISPLAY_CLASS:
+                device = _pci_gpu_info(match.groupdict(), match["driver"])
+                gpus.append(device)
+        elif device is not None and line.strip().startswith("device"):
+            # device     = 'GK208B [GeForce GT 710]'
+            device["DEVICE_NAME"] = line.partition("=")[2].strip().strip("'")
+    return gpus
+
+
+def _parse_pcidump(output: str) -> list[dict[str, str]]:
+    gpus = []
+    domain = "0"
+    device: dict[str, str] | None = None
+
+    def finish() -> None:
+        if device and device.get("class") == PCI_DISPLAY_CLASS and "vendor" in device:
+            gpus.append(_pci_gpu_info(device, name=device["name"]))
+
+    for line in output.splitlines():
+        if match := PCIDUMP_DOMAIN.match(line):
+            finish()
+            device = None
+            domain = match["domain"]
+        elif match := PCIDUMP_DEVICE.match(line):
+            finish()
+            device = {**match.groupdict(), "domain": domain}
+        elif device is not None:
+            for pattern in (PCIDUMP_IDS, PCIDUMP_CLASS, PCIDUMP_SUBSYSTEM):
+                if match := pattern.search(line):
+                    device.update(match.groupdict())
+    finish()
+    return gpus
+
+
+# Tools that list the PCI devices, with their arguments and the parser of their output
+PCI_LISTERS = (("pciconf", ["-lv"], _parse_pciconf), ("pcidump", ["-v"], _parse_pcidump))
+
+
+@cache_single
+def _get_pci_gpus() -> dict[str, dict[str, str]]:
+    """Return the GPUs found with the PCI tool of the system, named card0, card1... like the DRM cards are"""
+    for tool, args, parse in PCI_LISTERS:
+        if can_find_executable(tool):
+            return {"card%d" % index: gpu for index, gpu in enumerate(parse(read_process_output([tool, *args])))}
+    logger.warning(
+        "Can't list the GPUs, none of %s is available", ", ".join(tool for tool, _args, _parse in PCI_LISTERS)
+    )
+    return {}
+
+
 def get_gpu_cards() -> Iterable[str]:
     """Return GPUs connected to the system"""
+    if not IS_LINUX:
+        yield from _get_pci_gpus()
+        return
+
     if not os.path.exists("/sys/class/drm"):
-        if IS_LINUX:
-            logger.error("No GPU available on this system!")
-        else:
-            logger.debug("Can't list GPUs without /sys/class/drm")
+        logger.error("No GPU available on this system!")
         return
 
     try:
@@ -198,6 +307,8 @@ def get_gpu_cards() -> Iterable[str]:
 def get_gpu_info(card: str) -> dict[str, str]:
     """Return information about a GPU"""
     infos = {"DRIVER": "", "PCI_ID": "", "PCI_SUBSYS_ID": ""}
+    if not IS_LINUX:
+        return {**infos, **_get_pci_gpus().get(card, {})}
     try:
         with open(f"/sys/class/drm/{card}/device/uevent", encoding="utf-8") as card_uevent:
             content = card_uevent.readlines()
