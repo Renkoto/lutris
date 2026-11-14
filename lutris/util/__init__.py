@@ -1,11 +1,14 @@
 """Misc common functions"""
 
 import functools
+import sys
 from collections.abc import Callable, Mapping
 from typing import Any, Generic, TypeVar, cast
 
 AnyCallable = Callable[..., Any]
 DecoratedResult = TypeVar("DecoratedResult")
+
+IS_LINUX = sys.platform.startswith("linux")
 
 
 def selective_merge(base_obj: Any, delta_obj: Mapping[Any, Any]) -> Mapping[Any, Any]:
