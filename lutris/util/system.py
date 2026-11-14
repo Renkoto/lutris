@@ -17,6 +17,7 @@ from gi.repository import Gio, GLib
 
 from lutris import settings
 from lutris.exceptions import MissingExecutableError
+from lutris.util import IS_LINUX
 from lutris.util.log import logger
 from lutris.util.portals import TrashPortal
 
@@ -724,7 +725,22 @@ def get_locale_list() -> list[str]:
 
 def get_running_pid_list() -> list[int]:
     """Return the list of PIDs from processes currently running"""
+    if not IS_LINUX:
+        return [int(pid) for pid in read_process_output(["ps", "-ax", "-o", "pid="]).split()]
     return [int(p) for p in os.listdir("/proc") if p[0].isdigit()]
+
+
+def pid_exists(pid: int | str) -> bool:
+    """Return whether a process with this PID is running"""
+    if IS_LINUX:
+        return path_exists("/proc/%s" % pid)
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # Exists, but belongs to someone else
+    return True
 
 
 def get_mounted_discs() -> list[str | None]:

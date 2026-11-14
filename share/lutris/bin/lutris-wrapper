@@ -45,6 +45,20 @@ if _DEV_SOURCE_TREE:
     sys.dont_write_bytecode = True
 
 PR_SET_CHILD_SUBREAPER = 36  # Value of the constant in prctl.h
+P_PID = 0  # idtype_t in sys/wait.h
+PROC_REAP_ACQUIRE = 2  # Value of the constant in sys/procctl.h
+
+
+def set_child_reaper_freebsd():
+    """FreeBSD's equivalent of PR_SET_CHILD_SUBREAPER: orphaned descendants
+    are reparented to this process instead of init(8).
+    """
+    clib = ctypes.CDLL(find_library('c'))
+    procctl = clib.procctl
+    procctl.restype = ctypes.c_int
+    procctl.argtypes = [ctypes.c_int, ctypes.c_int64, ctypes.c_int, ctypes.c_void_p]
+    if procctl(P_PID, os.getpid(), PROC_REAP_ACQUIRE, None) == -1:
+        print("PROC_REAP_ACQUIRE failed, orphaned game processes won't be tracked")
 
 
 class NoMoreChildren(Exception):
@@ -76,6 +90,12 @@ def set_child_subreaper():
     Some init(1) frameworks (e.g., systemd(1)) employ a subreaper
     process for similar reasons.
     """
+    if sys.platform.startswith("freebsd"):
+        set_child_reaper_freebsd()
+        return
+    if not sys.platform.startswith("linux"):
+        print("Orphaned game processes won't be tracked, this system can't reparent them to Lutris")
+        return
     clib = ctypes.CDLL(find_library('c'))
     prctl = clib.prctl
     prctl.restype = ctypes.c_int

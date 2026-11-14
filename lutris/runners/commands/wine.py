@@ -319,7 +319,7 @@ def winekill(prefix, arch=WINE_DEFAULT_ARCH, wine_path="", env=None, initial_pid
     num_cycles = 0
     while True:
         num_cycles += 1
-        running_processes = [pid for pid in initial_pids if system.path_exists("/proc/%s" % pid)]
+        running_processes = [pid for pid in initial_pids if system.pid_exists(pid)]
 
         if not running_processes:
             break
