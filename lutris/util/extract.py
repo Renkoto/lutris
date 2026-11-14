@@ -9,7 +9,7 @@ import zlib
 
 from lutris import settings
 from lutris.exceptions import MissingExecutableError
-from lutris.util import system
+from lutris.util import IS_LINUX, system
 from lutris.util.log import logger
 
 
@@ -231,11 +231,12 @@ def _extract_7zip(path: str, dest: str, archive_type: str | None = None) -> None
 
 def _get_7zip_path() -> str:
     """Return the path where 7zip is installed"""
-    for bin_name in ["7z", "7za"]:
-        _7zip_path = os.path.join(settings.RUNTIME_DIR, f"p7zip/{bin_name}")
-        if system.path_exists(_7zip_path):
-            return _7zip_path
-    logger.warning("7z/7za not available in the runtime folder, using system version")
+    if IS_LINUX:  # The runtime's binaries are Linux ones
+        for bin_name in ["7z", "7za"]:
+            _7zip_path = os.path.join(settings.RUNTIME_DIR, f"p7zip/{bin_name}")
+            if system.path_exists(_7zip_path):
+                return _7zip_path
+        logger.warning("7z/7za not available in the runtime folder, using system version")
     try:
         return system.find_required_executable("7z")
     except MissingExecutableError:
@@ -283,14 +284,18 @@ def _decompress_gog(file_path: str, destination_path: str) -> None:
 
 def _get_innoextract_path() -> str:
     """Return the path where innoextract is installed"""
-    inno_dirs = [path for path in os.listdir(settings.RUNTIME_DIR) if path.startswith("innoextract")]
+    # The runtime's binaries are Linux ones
+    inno_dirs = (
+        [path for path in os.listdir(settings.RUNTIME_DIR) if path.startswith("innoextract")] if IS_LINUX else []
+    )
     for inno_dir in inno_dirs:
         inno_path = os.path.join(settings.RUNTIME_DIR, inno_dir, "innoextract")
         if system.path_exists(inno_path):
             return inno_path
 
     inno_path = system.find_required_executable("innoextract")
-    logger.warning("innoextract not available in the runtime folder, using some random version")
+    if IS_LINUX:
+        logger.warning("innoextract not available in the runtime folder, using some random version")
     return inno_path
 
 

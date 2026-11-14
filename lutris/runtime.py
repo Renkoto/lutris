@@ -15,7 +15,7 @@ from lutris.api import (
     get_time_from_api_date,
 )
 from lutris.gui.widgets.progress_box import ProgressInfo
-from lutris.util import http, system
+from lutris.util import IS_LINUX, http, system
 from lutris.util.downloader import SimpleDownloader
 from lutris.util.extract import extract_archive
 from lutris.util.jobs import AsyncCall
@@ -30,6 +30,20 @@ from lutris.util.wine.vkd3d import VKD3DManager
 
 RUNTIME_DISABLED = os.environ.get("LUTRIS_RUNTIME", "").casefold() in ("0", "off")
 DEFAULT_RUNTIME = "Ubuntu-18.04"
+
+# Runtime components that are Linux binaries or only serve Proton, which needs Linux; the rest are Windows
+# files (DXVK, vkd3d...), scripts and data that work anywhere.
+LINUX_ONLY_RUNTIMES = (
+    "Ubuntu-",
+    "p7zip",
+    "innoextract",
+    "network-tools",
+    "dxvk-cache-tool",
+    "umu",
+    "winetricks",  # bundles a Linux zenity
+    "eac_runtime",
+    "battleye_runtime",
+)
 
 DLL_MANAGERS = {
     "dxvk": DXVKManager,
@@ -108,7 +122,8 @@ def get_runtime_paths(
 
 def get_paths(version: str | None = None, prefer_system_libs: bool = True, wine_path: str | None = None) -> list[str]:
     """Return a list of paths containing the runtime libraries."""
-    if not RUNTIME_DISABLED:
+    # The runtime is made of Linux libraries
+    if not RUNTIME_DISABLED and IS_LINUX:
         paths = get_runtime_paths(version=version, prefer_system_libs=prefer_system_libs, wine_path=wine_path)
     else:
         paths = []
@@ -222,6 +237,9 @@ class RuntimeUpdater:
         for name, remote_runtime in runtime_versions.get("runtimes", {}).items():
             if remote_runtime["architecture"] == "x86_64" and not LINUX_SYSTEM.is_64_bit:
                 logger.debug("Skipping runtime %s for %s", name, remote_runtime["architecture"])
+                continue
+            if not IS_LINUX and name.startswith(LINUX_ONLY_RUNTIMES):
+                logger.debug("Skipping runtime %s, it only works on Linux", name)
                 continue
 
             try:

@@ -18,6 +18,7 @@ from lutris.database.schema import syncdb
 from lutris.game import Game
 from lutris.runners.json import load_json_runners
 from lutris.services import DEFAULT_SERVICES
+from lutris.util import IS_LINUX
 from lutris.util.graphics import vkquery
 from lutris.util.graphics.gpu import preload_gpus
 from lutris.util.linux import LINUX_SYSTEM
@@ -77,6 +78,8 @@ def check_libs(all_components=False):
     This is purely diagnostic logging and is run on a background thread
     at startup so the expensive ldconfig parse doesn't block the UI.
     """
+    if not IS_LINUX:
+        return
     try:
         missing_libs = LINUX_SYSTEM.get_missing_libs()
         if all_components:

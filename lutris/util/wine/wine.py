@@ -8,7 +8,7 @@ from typing import Any
 
 from lutris.exceptions import MisconfigurationError, UnspecifiedVersionError
 from lutris.settings import WINE_DIR
-from lutris.util import cache_single, linux, system
+from lutris.util import IS_LINUX, cache_single, linux, system
 from lutris.util.log import logger
 from lutris.util.process import Process
 from lutris.util.strings import get_natural_sort_key, parse_version
@@ -156,7 +156,7 @@ def get_installed_wine_versions() -> list[str]:
     # A dict, unlike a set, removes duplicates while keeping the order
     versions = dict.fromkeys(
         [
-            GE_PROTON_LATEST,
+            *([GE_PROTON_LATEST] if IS_LINUX else []),  # Runs through umu, which is Linux only
             *proton.list_proton_versions(),
             *list_lutris_wine_versions(),
             *list_system_wine_versions(),
@@ -243,6 +243,8 @@ def is_fsync_supported() -> bool:
 
 def get_default_wine_version() -> str:
     """Return the default version of wine."""
+    if not IS_LINUX:
+        return "system" if "system" in list_system_wine_versions() else "custom"
     return GE_PROTON_LATEST
 
 

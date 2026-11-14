@@ -237,8 +237,13 @@ if not libmagic or not libmagic._name:
         "cygwin": windows_dlls,
         "linux": ["libmagic.so.1"],
         # fallback for some Linuxes (e.g. Alpine) where library search does not work
+        "freebsd": ["libmagic.so"],
+        "netbsd": ["libmagic.so"],
+        "openbsd": ["libmagic.so"],
+        "dragonfly": ["libmagic.so"],
     }
-    platform = "linux" if sys.platform.startswith("linux") else sys.platform
+    # sys.platform ends with the major version on the BSDs, e.g. "freebsd15"
+    platform = "linux" if sys.platform.startswith("linux") else sys.platform.rstrip("0123456789")
     for dll in platform_to_lib.get(platform, []):
         try:
             libmagic = ctypes.CDLL(dll)

@@ -37,7 +37,7 @@ from lutris.runners.commands.wine import (  # noqa: F401 pylint: disable=unused-
     winetricks,
 )
 from lutris.runners.runner import RunDataDict, Runner
-from lutris.util import system
+from lutris.util import IS_LINUX, system
 from lutris.util.display import DISPLAY_MANAGER, get_default_dpi, is_display_x11
 from lutris.util.graphics import drivers, vkquery
 from lutris.util.http import HTTPError
@@ -479,7 +479,8 @@ class wine(Runner):
             "type": "bool",
             "warning": _get_esync_warning,
             "active": True,
-            "default": True,
+            "default": lambda: IS_LINUX,
+            "condition": lambda: IS_LINUX,  # Needs Linux's eventfd
             "help": _(
                 "Enable eventfd-based synchronization (esync). "
                 "This will increase performance in applications "
@@ -491,6 +492,7 @@ class wine(Runner):
             "label": _("Enable Fsync"),
             "type": "bool",
             "default": is_fsync_supported,
+            "condition": lambda: IS_LINUX,  # Needs Linux's futex_waitv
             "warning": _get_fsync_warning,
             "active": True,
             "help": _(

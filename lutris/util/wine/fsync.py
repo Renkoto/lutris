@@ -57,7 +57,7 @@ import subprocess
 
 __all__ = ("get_fsync_support",)
 
-from lutris.util import cache_single
+from lutris.util import IS_LINUX, cache_single
 
 
 # pylint: disable=invalid-name,too-few-public-methods
@@ -403,6 +403,8 @@ def get_fsync_support():
     Returns:
         The result of the check.
     """
+    if not IS_LINUX:
+        return False  # futex2 and its syscall numbers are Linux's
     if is_futex_waitv_supported():
         return True
     if is_futex2_supported():

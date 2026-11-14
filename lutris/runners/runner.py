@@ -15,7 +15,7 @@ from lutris.database.games import get_game_by_field
 from lutris.exceptions import MisconfigurationError, MissingExecutableError, UnavailableLibrariesError
 from lutris.monitored_command import MonitoredCommand
 from lutris.runners import RunnerInstallationError
-from lutris.util import flatpak, strings, system
+from lutris.util import IS_LINUX, flatpak, strings, system
 from lutris.util.extract import ExtractError, extract_archive
 from lutris.util.graphics.gpu import get_gpus
 from lutris.util.linux import LINUX_SYSTEM
@@ -479,6 +479,8 @@ class Runner:  # pylint: disable=too-many-public-methods
         """Run actions before running the game, override this method in runners; raise an
         exception if prelaunch fails, and it will be reported to the user, and
         then the game won't start."""
+        if not IS_LINUX:
+            return  # require_libs has Linux library names, which are looked up with ldconfig
         available_libs = set()
         for lib in set(self.require_libs):
             if lib in LINUX_SYSTEM.shared_libraries:

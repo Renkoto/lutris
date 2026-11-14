@@ -9,7 +9,7 @@ import re
 from collections.abc import Iterable
 from typing import TypeAlias
 
-from lutris.util import cache_single
+from lutris.util import IS_LINUX, cache_single
 from lutris.util.graphics.glxinfo import GlxInfo
 from lutris.util.log import logger
 from lutris.util.system import read_process_output
@@ -178,7 +178,10 @@ def is_nvidia() -> bool:
 def get_gpu_cards() -> Iterable[str]:
     """Return GPUs connected to the system"""
     if not os.path.exists("/sys/class/drm"):
-        logger.error("No GPU available on this system!")
+        if IS_LINUX:
+            logger.error("No GPU available on this system!")
+        else:
+            logger.debug("Can't list GPUs without /sys/class/drm")
         return
 
     try:
