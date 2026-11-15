@@ -243,7 +243,10 @@ if not libmagic or not libmagic._name:
         "dragonfly": ["libmagic.so"],
     }
     # sys.platform ends with the major version on the BSDs, e.g. "freebsd15"
-    platform = "linux" if sys.platform.startswith("linux") else sys.platform.rstrip("0123456789")
+    platform = next(
+        (name for name in ("linux", "freebsd", "netbsd", "openbsd", "dragonfly") if sys.platform.startswith(name)),
+        sys.platform,
+    )
     for dll in platform_to_lib.get(platform, []):
         try:
             libmagic = ctypes.CDLL(dll)
