@@ -70,6 +70,9 @@ def _get_sysctl_ram_info() -> dict[str, str]:
     return mem
 
 
+# Commands that Lutris only needs on Linux, other systems list GPUs and libraries their own way
+LINUX_ONLY_COMMANDS = ("lspci", "ldconfig")
+
 # Linux components used by lutris
 SYSTEM_COMPONENTS = {
     "COMMANDS": [
@@ -173,7 +176,7 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
                     command_path = self.get_sbin_path(command)
                 if command_path:
                     self._cache[key][command] = command_path
-                elif key == "COMMANDS":
+                elif key == "COMMANDS" and (IS_LINUX or command not in LINUX_ONLY_COMMANDS):
                     logger.warning("Command '%s' not found on your system", command)
 
         # Detect if system is 64bit capable
