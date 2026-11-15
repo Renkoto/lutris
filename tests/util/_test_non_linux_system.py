@@ -75,3 +75,22 @@ class TestSysctlSystemInfo(TestCase):
         with patch.object(linux, "IS_LINUX", False), patch.object(system, "read_process_output") as read_output:
             self.assertEqual(linux_system.get_ldconfig_libs(), [])
         read_output.assert_not_called()
+
+
+class TestMissingCommands(TestCase):
+    def warned_commands(self, is_linux):
+        with (
+            patch.object(linux, "IS_LINUX", is_linux),
+            patch("shutil.which", return_value=None),
+            patch.object(linux.LinuxSystem, "get_sbin_path", return_value=None),
+            patch.object(linux.logger, "warning") as warning,
+        ):
+            linux.LinuxSystem()
+        return {call.args[1] for call in warning.call_args_list if "not found" in call.args[0]}
+
+    def test_linux_only_commands_arent_missed_elsewhere(self):
+        self.assertTrue({"lspci", "ldconfig"}.isdisjoint(self.warned_commands(False)))
+        self.assertIn("xrandr", self.warned_commands(False))
+
+    def test_linux_still_reports_them(self):
+        self.assertTrue({"lspci", "ldconfig"} <= self.warned_commands(True))
