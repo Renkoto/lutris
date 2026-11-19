@@ -1,5 +1,7 @@
 """Tests for the Wine versions offered where GE-Proton, which needs umu, isn't available (non-Linux systems)"""
 
+import os
+import tempfile
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -54,3 +56,56 @@ class TestSyncOptions(TestCase):
             self.assertTrue(self.option("esync")["condition"]())
             self.assertTrue(self.option("esync")["default"]())
             self.assertTrue(self.option("fsync")["condition"]())
+
+
+class TestUsableWinePath(TestCase):
+    """Builds with the old WoW64 mode need a 32-bit root that may be missing"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bin_dir = os.path.join(self.tmp.name, "wine-x", "bin")
+        os.makedirs(self.bin_dir)
+        self.i386_root = os.path.join(self.tmp.name, "i386")
+        patcher = patch.dict(os.environ, {"WINE_i386_ROOT": self.i386_root})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.wine = self.touch("wine")
+
+    def touch(self, name, root=None):
+        path = os.path.join(root or self.bin_dir, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+        return path
+
+    def usable(self, is_linux=False):
+        with patch.object(wine, "IS_LINUX", is_linux):
+            return wine.get_usable_wine_path(self.wine)
+
+    def test_uses_the_loader_without_the_32_bit_root(self):
+        self.touch("wine64")
+        self.touch("wine64.bin")
+        self.assertEqual(self.usable(), os.path.join(self.bin_dir, "wine64.bin"))
+
+    def test_keeps_wine_with_the_32_bit_root(self):
+        self.touch("wine64.bin")
+        self.touch("bin/wine", root=self.i386_root + os.path.dirname(self.bin_dir))
+        self.assertEqual(self.usable(), self.wine)
+
+    def test_keeps_wine_when_the_build_has_no_loader(self):
+        self.assertEqual(self.usable(), self.wine)
+
+    def test_keeps_wine_on_linux(self):
+        self.touch("wine64.bin")
+        self.assertEqual(self.usable(is_linux=True), self.wine)
+
+    def test_keeps_wine_from_the_path(self):
+        with patch.object(wine, "IS_LINUX", False):
+            self.assertEqual(wine.get_usable_wine_path("wine"), "wine")
+
+    def test_wineboot_runs_through_the_loader(self):
+        loader = os.path.join(self.bin_dir, wine.WINE64_LOADER)
+        self.assertEqual(wine.get_wineboot_command(loader), [loader, "wineboot"])
+
+    def test_wineboot_is_the_link_next_to_wine(self):
+        self.assertEqual(wine.get_wineboot_command(self.wine), [os.path.join(self.bin_dir, "wineboot")])

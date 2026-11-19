@@ -23,18 +23,55 @@ WINE_PATHS: dict[str, str] = {
     "system": "wine",
 }
 
+# Where additional system-wide Wine installations live: /usr/lib on Linux, the ports' LOCALBASE on BSD
+_WINE_BUILDS_DIR = "/usr/lib" if IS_LINUX else os.environ.get("LOCALBASE", "/usr/local")
+
+# The loader that BSD Wine builds with the old WoW64 mode ship next to their 'wine' script
+WINE64_LOADER = "wine64.bin"
+_warned_32_bit_roots: set[str] = set()
+
 # Insert additional system-wide Wine installations.
 try:
-    if system.path_exists("/usr/lib"):
-        for _candidate in os.listdir("/usr/lib/"):
+    if system.path_exists(_WINE_BUILDS_DIR):
+        for _candidate in os.listdir(_WINE_BUILDS_DIR):
             if _candidate.startswith("wine-"):
-                _wine_path = os.path.join("/usr/lib/", _candidate, "bin/wine")
+                _wine_path = os.path.join(_WINE_BUILDS_DIR, _candidate, "bin/wine")
                 if os.path.isfile(_wine_path):
                     WINE_PATHS["System " + _candidate] = _wine_path
     _candidate = None
     _wine_path = None
 except Exception as ex:
     logger.exception("Unable to enumerate system Wine versions: %s", ex)
+
+
+def get_usable_wine_path(wine_path: str) -> str:
+    """Return the Wine executable to run for 'wine_path'. On BSD, a Wine build that still has
+    the old WoW64 mode makes 'wine' a script that needs a 32-bit root (~/.i386-wine-pkg, from
+    its pkg32.sh) and refuses to run without it; when that root is missing but the build
+    ships its own loader, this returns that instead."""
+    if IS_LINUX:
+        return wine_path
+    real_path = os.path.realpath(wine_path)
+    bin_dir = os.path.dirname(real_path)
+    loader_path = os.path.join(bin_dir, WINE64_LOADER)
+    if not (os.path.isfile(real_path) and os.path.isfile(loader_path)):
+        return wine_path
+    # The same lookup the script makes; its Wine install path is repeated inside the root
+    i386_root = os.environ.get("WINE_i386_ROOT") or os.path.expanduser("~/.i386-wine-pkg")
+    if os.path.isfile(i386_root + os.path.dirname(bin_dir) + "/bin/wine"):
+        return wine_path
+    if loader_path not in _warned_32_bit_roots:
+        _warned_32_bit_roots.add(loader_path)
+        logger.warning("No 32-bit Wine in %s, using %s", i386_root, loader_path)
+    return loader_path
+
+
+def get_wineboot_command(wine_path: str) -> list[str]:
+    """Return the command that runs wineboot for 'wine_path'; it is a link to the 'wine'
+    script next to it, which is what get_usable_wine_path() avoids, so the loader runs it."""
+    if os.path.basename(wine_path) == WINE64_LOADER:
+        return [wine_path, "wineboot"]
+    return [os.path.join(os.path.dirname(wine_path), "wineboot")]
 
 
 def detect_arch(prefix_path: str | None = None, wine_path: str | None = None) -> str:
@@ -197,7 +234,7 @@ def get_wine_path_for_version(version: str, config: dict | None = None) -> str:
     if version == GE_PROTON_LATEST:
         return proton.get_umu_path()
     if version in WINE_PATHS:
-        return system.find_required_executable(WINE_PATHS[version])
+        return get_usable_wine_path(system.find_required_executable(WINE_PATHS[version]))
     if proton.is_proton_version(version):
         return proton.get_proton_wine_path(version)
     if version == "custom":
@@ -254,7 +291,7 @@ def get_system_wine_version(wine_path: str = "wine") -> str:
         return ""
     if wine_path == "wine" and not system.can_find_executable("wine"):
         return ""
-    version = system.read_process_output([wine_path, "--version"])
+    version = system.read_process_output([get_usable_wine_path(wine_path), "--version"])
     if not version:
         logger.error("Error reading wine version for %s", wine_path)
         return ""

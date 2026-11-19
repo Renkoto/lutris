@@ -27,6 +27,7 @@ from lutris.util.wine.wine import (
     detect_arch,
     get_overrides_env,
     get_real_executable,
+    get_wineboot_command,
     is_installed_systemwide,
     is_prefix_directory,
 )
@@ -222,13 +223,13 @@ def create_prefix(
         umu_command.start()
     else:
         umu_command = None
-        wineboot_path = os.path.join(os.path.dirname(wine_path), "wineboot")
-        if not system.path_exists(wineboot_path):
+        wineboot_command = get_wineboot_command(wine_path)
+        if not system.path_exists(wineboot_command[0]):
             raise RuntimeError(
                 _("No wineboot executable found in %s, your wine installation is most likely broken") % wine_path
             )
 
-        system.execute([wineboot_path], env=wineenv)
+        system.execute(wineboot_command, env=wineenv)
 
     for loop_index in range(1000):
         time.sleep(0.5)
