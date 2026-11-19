@@ -172,7 +172,10 @@ def main():
 
     returncode = None
     try:
-        process_pid = subprocess.Popen(args).pid
+        # Keep the Popen object: once dropped, a later Popen() (the process
+        # watcher runs ps outside Linux) reaps the child and loses its status.
+        process = subprocess.Popen(args)
+        process_pid = process.pid
     except FileNotFoundError:
         log("Failed to execute process '%s'. Check that the file exists" % " ".join(args))
         return
