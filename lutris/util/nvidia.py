@@ -3,6 +3,7 @@
 import os
 from ctypes import CDLL, POINTER, Structure, addressof, c_char_p, c_int, c_void_p, cast
 
+from lutris.util import IS_LINUX
 from lutris.util.log import logger
 
 RTLD_DI_LINKMAP = 2
@@ -31,10 +32,12 @@ class LinkMap(Structure):
 
 def get_nvidia_glx_path():
     """Return the absolute path to the libGLX_nvidia library"""
+    # Outside Linux there is no libdl: dlinfo(3) is in the C library, which is already loaded
+    libdl_name = "libdl.so.2" if IS_LINUX else None
     try:
-        libdl = CDLL("libdl.so.2")
+        libdl = CDLL(libdl_name)
     except OSError:
-        logger.error("Unable to load libdl.so.2")
+        logger.error("Unable to load %s", libdl_name)
         return None
 
     try:
