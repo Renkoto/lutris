@@ -34,3 +34,13 @@ class TestKillAllWineProcesses(unittest.TestCase):
         self.assertEqual(
             [call.args for call in kill.call_args_list], [(pid, signal.SIGKILL) for pid in (101, 102, 103)]
         )
+
+
+class TestIsWineProcessWithoutProc(unittest.TestCase):
+    def test_other_systems_go_by_the_executable_name(self):
+        names = {1: "wine64.bin", 2: "wineserver", 3: "wine64-preloader", 4: "codium", 5: None}
+        with (
+            patch.object(wine, "IS_LINUX", False),
+            patch.object(wine, "Process", side_effect=lambda pid: type("P", (), {"name": names[pid]})),
+        ):
+            self.assertEqual([pid for pid in names if wine.is_wine_process(pid)], [1, 2, 3])

@@ -360,13 +360,17 @@ WINE_BINARIES = {"wine", "wine64", "wine-preloader", "wine64-preloader", "winese
 
 def is_wine_process(pid: int) -> bool:
     """True if the process 'pid' is running one of Wine's own binaries."""
-    try:
-        executable = os.readlink("/proc/%s/exe" % pid)
-    except OSError:
-        return False  # it has exited, or isn't ours to inspect
+    if IS_LINUX:
+        try:
+            executable = os.readlink("/proc/%s/exe" % pid)
+        except OSError:
+            return False  # it has exited, or isn't ours to inspect
+    else:
+        executable = Process(pid).name or ""  # no /proc/<pid>/exe; ps gives the executable's name
     # Linux marks a binary replaced on disk while it runs, as a Proton update might do
     executable = executable.removesuffix(" (deleted)")
-    return os.path.basename(executable) in WINE_BINARIES
+    # Some builds keep the real loader as wine64.bin, behind a wrapper script
+    return os.path.basename(executable).removesuffix(".bin") in WINE_BINARIES
 
 
 def kill_all_wine_processes() -> int:
